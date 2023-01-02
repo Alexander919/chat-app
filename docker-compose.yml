@@ -1,0 +1,18 @@
+version: "3.8"
+services:
+  nodeserver:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - /app/node_modules
+      - ./app:/app
+    stdin_open: true # for docker attach
+    tty: true        #
+  databaseserver:
+    image: "mongo:4"
+    volumes:
+      - ./dbdata:/data/db
+  
