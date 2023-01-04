@@ -20,10 +20,10 @@
       #messages > li { padding: 0.5rem 1rem; }
       #messages > li:nth-child(odd) { background: #efefef; }
 
-      .row { display: flex; align-items: center; height: 20%; }
+      .row { display: flex; align-items: center; height: 20vh; }
       .column {flex-grow: 1; /*border: solid 1px;*/ }
-      .room-title { width: 50%; margin: auto; text-align: center;}
-      .hidden { display: none; }
+      .room-title { width: 15vw; margin: auto; text-align: center;}
+      .hidden { visibility:hidden; }
       /* .title { align-self: center;} */
     </style>
 </head>
@@ -45,6 +45,9 @@
         <div class="column">
             <div class="room-title">
                 <a href="#" id="common">Back to Common Room</a>
+                <div>
+                    <h3><a href="/">quit</a></h3>
+                </div>
             </div>
         </div>
     </div>

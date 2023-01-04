@@ -125,13 +125,14 @@ io.on("connection", socket => {
     });
     socket.on("private message", async (msg, { chatId, username: to }) => {
         const message = { text: msg, user: socket.user, time: new Date().toLocaleTimeString() };
+
         const chat = privateChats.get(chatId);
         chat.push(message);
         
         const toUser = users.find(user => user.username === to); //find the 'to' user
 
         const usersInRoom = await io.in(chatId).fetchSockets();//fetch sockets from the room 'chatId'
-        console.log("users in the room", usersInRoom.length);
+        //console.log("users in the room", usersInRoom.length);
         if (usersInRoom.length > 1) { // toUser is in the room
             io.to(chatId).emit("private message", message);// send to both
         } else {
