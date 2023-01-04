@@ -19,28 +19,45 @@
       #messages { list-style-type: none; margin: 0; padding: 0; }
       #messages > li { padding: 0.5rem 1rem; }
       #messages > li:nth-child(odd) { background: #efefef; }
+
+      .row { display: flex; align-items: center; height: 20%; }
+      .column {flex-grow: 1; /*border: solid 1px;*/ }
+      .room-title { width: 50%; margin: auto; text-align: center;}
+      .hidden { display: none; }
+      /* .title { align-self: center;} */
     </style>
 </head>
 <body>
-    <div>
-        <ul id="friends">
-            <!-- <a href="#"><li id="alex">alex</li></a> -->
-            <!-- <a href="#"><li id="john">john</li></a> -->
-            <!-- <a href="#"><li id="greg">greg</li></a> -->
-            <!-- <a href="#"><li id="peter">peter</li></a> -->
-        </ul>
+    <div class="row">
+        <div class="column">
+            <ul id="friends">
+                <!-- <a href="#"><li id="alex">alex</li></a> -->
+                <!-- <a href="#"><li id="john">john</li></a> -->
+                <!-- <a href="#"><li id="greg">greg</li></a> -->
+                <!-- <a href="#"><li id="peter">peter</li></a> -->
+            </ul>
+        </div>
+        <div class="column">
+            <div class="room-title">
+                <h2 id="room"></h2>
+            </div>
+        </div>
+        <div class="column">
+            <div class="room-title">
+                <a href="#" id="common">Back to Common Room</a>
+            </div>
+        </div>
     </div>
 
     <ul id="messages"></ul>
 
     <div id="typingDiv">
-        <span id="typingInput">john is typing...</span>
+        <!-- <span id="typingInput">john is typing...</span> -->
     </div>
     <form id="sendForm" action="">
         <input id="sendInput" autocomplete="off" />
         <button>Send</button>
     </form>    
-    <!-- <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script> -->
     <script type="module" src="./chat_test.js"></script>
 </body>
 </html>

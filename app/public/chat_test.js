@@ -2,19 +2,24 @@ import socket from "./sock.js";
 //TODO: make global variables uppercase
 let allUsers;
 
-const username = getUsernameFromParams("username");
+//const username = getUsernameFromParams("username");
+const USERNAME = getUsernameFromParams("username");
 //TODO: check if username exists, if not redirect to /
 let selectedUser = null; //if no user is selected your messages go to public chat
-let ME;
+let ME; //my user object
 
 const friends = document.getElementById("friends");
 const sendForm = document.getElementById("sendForm");
 const sendInput = document.getElementById("sendInput");
 const messages = document.getElementById("messages");
+const roomTitle = document.getElementById("room");
+const commonRoomLink = document.getElementById("common");
 
 socket.connect();
 //pass in username to the server socket
-socket.auth = { username };
+socket.auth = { username: USERNAME };
+
+sendInput.focus();
 
 function getUsernameFromParams(param) {
     const url = new URL(window.location.href);
@@ -23,46 +28,92 @@ function getUsernameFromParams(param) {
     return search.get(param);
 }
 
+commonRoomLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    if(selectedUser) {
+        socket.emit("leave room", selectedUser.chatId); //leave current room
+
+
+        socket.emit("public chat"); //load public chat
+    }
+    sendInput.focus();
+});
+
 sendForm.addEventListener("submit", e => {
     e.preventDefault();
 
-    const message = sendInput.value;
-    if(message.trim() === "") return;
+    const input = sendInput.value;
+    if(input.trim() === "") return;
 
     if(selectedUser) {
-        socket.emit("private message", message, selectedUser);
+        socket.emit("private message", input, selectedUser);
     } else {
-        socket.emit("public message", message);
+        socket.emit("public message", input);
     }
+    sendInput.value = "";
 });
 
 function getUser(usernameToFind) {
     const user = allUsers.find(user => user.username === usernameToFind);
     if(!user) {
-        throw new Error(`User ${username} not found!`);
+        throw new Error(`User ${usernameToFind} not found!`);
     }
     return user;
 }
+//default value for 'id' is null
+//second parameter must look like this: 
+//{ 
+//    username: "chater", 
+//    chatIds: { "chatee": {  // [myUsername]
+//                      id: "chatId",
+//                      hasNewMessage
+//                      }
+//    }
+//}
+//If alex is trying to chat with john(current user)
+// fromUser object(the one that is being destructured)
+//{  
+//    username: "alex", 
+//    chatIds: { "john": {
+//                          id: "14134134123",
+//                          hasNewMessage
+//                      }
+//    }
+//}
+//alex becomes the chatee to john
+//chat = me.chatIds[chatee] = { id };
 
-function setHasNewMessageTo(bool, usernameToFind) {
-    const user = getUser(usernameToFind);
-    const chat = user.chatIds[username];
-    if(chat) {
-        chat.hasNewMessage = bool;
+//function setHasNewMessageTo(bool, { username: chatee, chatIds: { [username]: { id } = { id: null } } }) {
+function setHasNewMessageTo(bool, { username: chatee, chatIds }) {
+    //destructuring: computed property name [myUsername] destructures the object that it contains { id: "chatId", hasNewMessage } to retrieve the 'id'
+    const { [USERNAME]: { id } } = chatIds;
+
+    if(id === null) {
+        throw new Error(`Chat with the user ${chatee} does not exist!`);
     }
+
+    const me = getUser(USERNAME);
+    let chat = me.chatIds[chatee];
+
+    if(!chat) {
+        //save the chat id
+        chat = me.chatIds[chatee] = { id };
+    }
+    chat.hasNewMessage = bool;
 }
 
-friends.addEventListener("click", (e) => {
+friends.addEventListener("click", e => {
     const li = e.target;
-    li.style.color = "blue";
     const toUser = li.id;
-    const fromUser = username;
+    const fromUser = USERNAME;
+    console.log(toUser);
 
-    const toUserObj = allUsers.find(user => user.username === toUser);
-    console.log(toUserObj);
-    setHasNewMessageTo(false, toUser);
+    if(selectedUser) { //jumping between private chats
+        socket.emit("leave room", selectedUser.chatId);
+    }
 
-    socket.emit("create private chat", fromUser, toUser);
+    socket.emit("private chat", fromUser, toUser);
+    sendInput.focus();
 });
 
 //socket.emit("online", {username, data: "bla"});
@@ -83,11 +134,11 @@ function getNewMessageUsers(me) {
 }
 
 function renderUsers(users) {
-    const me = users.find(user => user.username === username);
+    const me = users.find(user => user.username === USERNAME);
     const newMessageFromUsers = getNewMessageUsers(me);
 
-    const usersList = document.getElementById("friends");
-    usersList.innerHTML = "";
+    //const usersList = document.getElementById("friends");
+    friends.innerHTML = "";
 
     users.forEach(user => {
         const li = document.createElement("li");
@@ -96,17 +147,23 @@ function renderUsers(users) {
             li.textContent = `${user.username}(Me)`;
         } else {
             a.href = "#";
+            //any new messages from user?
             if(newMessageFromUsers.includes(user.username)) {
                 li.style.color = "green";
             } else {
                 li.style.color = "blue";
             }
+
+            //highlight selected user
+            if(selectedUser && (user.username === selectedUser.username)) {
+                li.style.backgroundColor = "lightgrey";
+            }
+
             li.id = user.username;
             li.textContent = `${user.username}(${user.isConnected ? 'online' : 'offline'})`;
         }
         a.appendChild(li);
-        //li.addEventListener("click", privateChat);
-        usersList.appendChild(a);
+        friends.appendChild(a);
     });
 }
 function appendUser(user) {
@@ -115,7 +172,7 @@ function appendUser(user) {
 
 function appendMessage(msg) {
     const li = document.createElement("li");
-    msg.me = msg.user.username === username;
+    msg.me = msg.user.username === USERNAME;
 
     li.innerHTML = `<em>${msg.time}</em> | ${msg.me ? '<strong>Me</strong>' : msg.user.username} > ${msg.text}`;
     messages.appendChild(li);
@@ -123,38 +180,51 @@ function appendMessage(msg) {
 
 function renderChat(chat) {
     messages.innerHTML = "";
-
     chat.forEach(appendMessage);
 }
 
 function scrollBottom() {
     window.scrollTo(0, document.body.scrollHeight);
 }
-
 //TODO: need one protocol for all events e.g. username as a first argument
 //then we can make a list of events that require the toUser and find it before any other event is fired
 socket.prependAny((eventName, ...args) => {
 
 });
 
-socket.on("user left", leftUser => {
-    const cUser = allUsers.find(user => user.username === leftUser.username);
-    cUser.isConnected = false;
+function userJoinedLeft(user, joined) {
+    if(selectedUser && selectedUser.username !== user) return;//print only if we are in the Common Room or chatting with that person
+    const li = document.createElement("li");
+    li.innerHTML = `<em>User <strong>${user}</strong> ${ joined ? 'joined' : 'left' } the chat!</em>`;
+    messages.appendChild(li);
+}
+
+function connectedLeftEvent({ username }, conn) { // conn = connected is a boolean
+    const localUser = getUser(username);
+    localUser.isConnected = conn;// we set isConnected to true/false on the server upon the connection/disconnect event receival
     renderUsers(allUsers);
+    userJoinedLeft(username, conn);
+}
+
+socket.on("bad connection", () => {
+    alert("Bad connection");
+    window.location.href = "/";
 });
 
-socket.on("user connected", connectedUser => {
-    //TODO: print to chat that user is connected
-    const cUser = allUsers.find(user => user.username === connectedUser.username);
-    cUser.isConnected = true;
-    renderUsers(allUsers);
-});
+socket.on("user connected", connectedLeftEvent);
+socket.on("user left", connectedLeftEvent);
+//socket.on("user left", ({ username }, _) => { //user that we chatted with left
+    //if(selectedUser && selectedUser.username === username) { 
+    //    selectedUser = null; //TODO: bug need fix. user can't go to the Common Room
+    //}
+//});
 
 //render the list of users
 socket.on("all users", users => {
     users.forEach(user => {
-        if(user.username === username) {
+        if(user.username === USERNAME) {
             user.me = true;
+            ME = user;
         }
     });
     users.sort(meFirst);
@@ -163,48 +233,71 @@ socket.on("all users", users => {
     renderUsers(allUsers);
 });
 
-socket.on("public message", msg => {
+function publicMessageCb(msg) {
     appendMessage(msg);
     scrollBottom();
+}
+
+//socket.on("public message", publicMessageCb);
+//console.log(socket.hasListeners("public message"));
+//render public chat history
+socket.on("public chat", publicChat => {
+    if(!socket.hasListeners("public message"))
+        socket.on("public message", publicMessageCb); //activate 'public message' event
+
+    selectedUser = null;
+    roomTitle.textContent = "Common Room";
+    commonRoomLink.classList.add("hidden"); 
+    renderChat(publicChat);
+    renderUsers(allUsers);
 });
 
 socket.on("private message", (message) => {
     console.log("private message", message);
-    if(selectedUser && ((message.user.username === selectedUser.username) || (message.user.username === username))) { //user selected or self
+    const msgFromUsername = message.user.username;
+    if(selectedUser && 
+        ((msgFromUsername === selectedUser.username) || //chat window with the selected user is opened
+            (msgFromUsername === USERNAME))) { //message from myself
         appendMessage(message);
-    } else {
-        const toUser = allUsers.find(user => user.username === message.user.username);
-        toUser.chatIds[username].hasNewMessage = true; // toUser.chatIds[chatee].hasNewMessage = true
-        renderUsers(allUsers);
     }
     scrollBottom();
 });
-//render public chat history
-socket.on("public chat", publicChat => {
-    renderChat(publicChat);
+
+//I'm online but chatting to someone else
+socket.on("has new message", (toUser, fromUser, chatId) => {
+    if(toUser.username === USERNAME) {//I am the receiver
+        setHasNewMessageTo(true, fromUser);
+        //set hasNewMessage for toUser to true on the server
+        //socket.emit("has new message", true, fromUser, toUser, chatId);
+        renderUsers(allUsers);
+    }
 });
 
-//TODO:add isSelected to each user. if some user is selected then send the message to that recepient, if not send to public chat
 socket.on("private chat", ({ chatId, username: toUsername, history }) => {
-    //TODO: figure out if I need the next two lines
-    const recepient = allUsers.find(user => user.username === toUsername);
-    recepient.chatIds[username] = { id: chatId, hasNewMessage: false }; //username is clients' username(global)
+    //const recepient = allUsers.find(user => user.username === toUsername);
+    const me = allUsers.find(user => user.username === USERNAME);
+
+    //recepient.chatIds[username] = { id: chatId, hasNewMessage: false }; //username is clients' username(global)
+    me.chatIds[toUsername] = { id: chatId, hasNewMessage: false };
     //recepient.isSelected = true;
     selectedUser = { username: toUsername, chatId };
-    socket.off("public message");
+
+    socket.off("public message"); //disable public messages
 
     if(history) {
         renderChat(history);
     } else {
         messages.innerHTML = "";
     }
-    //console.log("selected user", selectedUser);
-    //console.log("recepient", recepient);
+
+    roomTitle.textContent = `Chatting privately with ${toUsername}`;
+    commonRoomLink.classList.remove("hidden"); //show the link to the Common Room
+    renderUsers(allUsers);
 });
 
-socket.on("connect", function() {
-    socket.emit("public chat");
-});
+//socket.on("connect", function() {
+//    //socket.emit("public chat");
+//});
 
 //TODO: when one user opens two tabs and then closes one of them he is seen as offline to everyone else
 

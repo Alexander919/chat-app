@@ -51,36 +51,43 @@ io.on("connection", socket => {
     //find that username in db
     const user = users.find(user => user.username === connectedUsername);
     //TODO: check if user exists
+    if(user.isConnected || !user) {
+        return socket.emit("bad connection");
+    }
     user.isConnected = true;
 
     socket.user = user;
     //send to self
     socket.emit("all users", users);
+    //TODO: return last say 50 messages
+    socket.emit("public chat", publicChat);
     //send to everyone except yourself
-    socket.broadcast.emit("user connected", {
-        username: connectedUsername
-    });
+    socket.broadcast.emit("user connected", user, true);
+    //TODO: add message to public chat that user joined
 
     socket.on("disconnect", reason => {
         console.log(reason);
 
         socket.user.isConnected = false;
-        socket.broadcast.emit("user left", socket.user);
+        socket.broadcast.emit("user left", socket.user, false);
+    });
+
+    socket.on("leave room", chatId => {
+        socket.leave(chatId);
     });
 
     socket.on("public chat", function() {
-        //TODO: return last say 50 messages
         socket.emit("public chat", publicChat);
     });
 
     socket.on("public message", msg => {
         const message = { text: msg, user: socket.user, time: new Date().toLocaleTimeString() };
         publicChat.push(message);
-        io.emit("public message", message);
+        io.emit("public message", message);//send to everybody including myself
     });
 
     //TODO: check that users exist
-    socket.on("create private chat", function (from, to) {
+    socket.on("private chat", function (from, to) {
         if(from === to) return;
 
         let chatId;
@@ -103,7 +110,8 @@ io.on("connection", socket => {
             fromUser.chatIds[to] = { id: chatId, hasNewMessage: false };
             toUser.chatIds[from] = { id: chatId, hasNewMessage: false };
         }
-        socket.join(chatId);
+
+        socket.join(chatId); // current user joins the room 'chatId'
         console.log("joined");
 
         return socket.emit("private chat", { chatId, username: to, history });
@@ -115,20 +123,31 @@ io.on("connection", socket => {
         //    console.log(id);
         //}
     });
-    socket.on("private message", (msg, {chatId, username: to}) => {
+    socket.on("private message", async (msg, { chatId, username: to }) => {
         const message = { text: msg, user: socket.user, time: new Date().toLocaleTimeString() };
         const chat = privateChats.get(chatId);
         chat.push(message);
         
         const toUser = users.find(user => user.username === to); //find the 'to' user
 
-        if(!toUser.isConnected) { //user is offline
-            //user = { username, chatIds: chatee: { chatId, hasNewMessage } }
+        const usersInRoom = await io.in(chatId).fetchSockets();//fetch sockets from the room 'chatId'
+        console.log("users in the room", usersInRoom.length);
+        if (usersInRoom.length > 1) { // toUser is in the room
+            io.to(chatId).emit("private message", message);// send to both
+        } else {
+            if(toUser.isConnected) {
+                //TODO: send to the required user only
+                socket.broadcast.emit("has new message", toUser, socket.user, chatId); //send notification to all users except myself
+            }
             toUser.chatIds[socket.user.username].hasNewMessage = true; //notify the user that he has new unread messages when he logges in
+            socket.emit("private message", message);// send to myself
         }
-        //send to all users in the room including the sender
-        io.to(chatId).emit("private message", message);
     });
+
+    //socket.on("has new message", (bool, chatee, me, chatId) => {
+    //    const user = users.find(user => user.username === me.username);
+    //    user.chatIds[chatee.username] = { id: chatId, hasNewMessage: bool };
+    //});
 
     //socket.on("typing", msg => {
     //    socket.broadcast.emit("typing", msg);
