@@ -47,10 +47,12 @@ app.get("/chat", (req, res) => {
 io.on("connection", socket => {
     //console.log(socket.handshake.headers.cookie);
     //console.log(io.sockets.sockets); //all connected sockets
+    //TODO: all new users join the public_chat_room
+    //later if they join some private room they leave public room and vice versa
     const connectedUsername = socket.handshake.auth.username;
     //find that username in db
     const user = users.find(user => user.username === connectedUsername);
-    //TODO: check if user exists
+
     if(user.isConnected || !user) {
         return socket.emit("bad connection");
     }
@@ -63,7 +65,6 @@ io.on("connection", socket => {
     socket.emit("public chat", publicChat);
     //send to everyone except yourself
     socket.broadcast.emit("user connected", user, true);
-    //TODO: add message to public chat that user joined
 
     socket.on("disconnect", reason => {
         console.log(reason);
@@ -143,6 +144,27 @@ io.on("connection", socket => {
             toUser.chatIds[socket.user.username].hasNewMessage = true; //notify the user that he has new unread messages when he logges in
             socket.emit("private message", message);// send to myself
         }
+    });
+
+    //TODO: join into one event called 'typing'
+    socket.on("started typing", (username, selUser) => {
+        console.log("received 'started typing'");
+        console.log("selected user", selUser);
+        if(selUser) {
+            const room = selUser.chatId;
+            return socket.to(room).emit("started typing", username);
+        }
+        socket.broadcast.emit("started typing", username);
+    });
+
+    socket.on("stopped typing", (username, selUser) => {
+        console.log("received 'stopped typing'");
+        console.log("selected user", selUser);
+        if(selUser) {
+            const room = selUser.chatId;
+            return socket.to(room).emit("stopped typing", username);
+        }
+        socket.broadcast.emit("stopped typing", username);
     });
 
     //socket.on("has new message", (bool, chatee, me, chatId) => {

@@ -3,7 +3,7 @@ import socket from "./sock.js";
 const USERNAME = getUsernameFromParams("username"); //my username
 
 let ALL_USERS = null; //all users
-let SELECTED_USER = null; //if no user is selected your messages go to public chat
+let SELECTED_USER = null; // currently selected user(private chat)
 let ME = null; //my user object
 
 const friends = document.getElementById("friends");
@@ -41,8 +41,8 @@ function scrollBottom() {
     window.scrollTo(0, document.body.scrollHeight);
 }
 
-function getUser(usernameToFind) {
-    const user = ALL_USERS.find(user => user.username === usernameToFind);
+function getUser(usernameToFind, allUsers) {
+    const user = allUsers.find(user => user.username === usernameToFind);
     if(!user) {
         throw new Error(`User ${usernameToFind} not found!`);
     }
@@ -73,17 +73,19 @@ sendForm.addEventListener("submit", e => {
 });
 
 friends.addEventListener("click", e => {
+    sendInput.focus();
+
     const li = e.target;
     const toUser = li.id;
     const fromUser = USERNAME;
-    console.log(toUser);
 
     if(SELECTED_USER) { //jumping between private chats
+        if(SELECTED_USER.username === toUser)
+            return;
         socket.emit("leave room", SELECTED_USER.chatId);
     }
 
     socket.emit("private chat", fromUser, toUser);
-    sendInput.focus();
 });
 
 //second parameter must look like this: 
@@ -189,7 +191,7 @@ function userJoinedLeft(username, joined) {
 }
 
 function connectedLeftEvent({ username }, conn) { // conn = connected is a boolean
-    const localUser = getUser(username);
+    const localUser = getUser(username, ALL_USERS);
     localUser.isConnected = conn;// we set isConnected to true/false on the server upon the connection/disconnect event receival
     renderUsers(ALL_USERS);
     userJoinedLeft(username, conn);
@@ -269,6 +271,61 @@ socket.on("private chat", ({ chatId, username: toUsername, history }) => {
     commonRoomLink.classList.remove("hidden"); //show the link to the Common Room
     renderUsers(ALL_USERS);
 });
+
+//USER TYPING
+
+//debouncer runs functions provided no often then once in 'time' milliseconds
+function debouncer(sendStarted, sendStopped, time=500) {
+    let timer = null;
+    let started = false; // user started typing
+    return () => {
+        console.log(timer, started);
+        if(!started) { //allow to run sendStarted only once before the timer runs out
+            console.log("sendStarted is called");
+            started = true;
+            sendStarted();
+        }
+        clearTimeout(timer);
+        timer = setTimeout(() => { //if timer runs out call sendStopped and reset started
+            console.log("sendStopped is called");
+            started = false;
+            sendStopped();
+        }, time);
+    }
+}
+//TODO: instead of two events make one with true/false standing for started/stopped typing
+const typing = function() { socket.emit(this, USERNAME, SELECTED_USER) } 
+
+//const userTyping = debouncer(
+//    () => socket.emit("started typing", USERNAME, SELECTED_USER), // user started typing event
+//    () => socket.emit("stopped typing", USERNAME, SELECTED_USER), // user stopped typing event
+//    2000);                                         // time after which send the 'stopped typing' event
+const userTyping = debouncer(
+    typing.bind("started typing"),
+    typing.bind("stopped typing"),
+    2000);                                         // time after which send the 'stopped typing' event
+
+// on the first run of the userTyping function the sendStarted function is called
+// it is called only once until the timer runs out
+// while the user is typing the timer keeps resetting itself
+// if there is no input for 2 seconds the timer runs out and the sendStopped function is called
+// on the following call of the userTyping function the sendStarted will be called again and so on it goes.
+sendInput.addEventListener("input", userTyping);
+
+const userTypingSpan = document.getElementById("user-typing");
+
+socket.on("started typing", username => {
+    userTypingSpan.innerHTML = `<em>${username} is typing...</em>`;
+});
+
+socket.on("stopped typing", username => {
+    userTypingSpan.innerHTML = "";
+});
+
+//TODO: multiuser typing. Hard code the <ul></ul>. On 'started typing' event create a <li></li> string with id of user
+// and contents of username. Push to array, join on 'and' and finally add 'is/are typing'.
+// Keep adding users if there are more 'started typing' events.
+// When the 'stopped typing' event is received remove from array and do the above.
 
 //socket.on("connect", function() {
 //    //socket.emit("public chat");
