@@ -1,5 +1,6 @@
 import socket from "./sock.js";
 
+//GLOBAL VARIABLES
 const USERNAME = getUsernameFromParams("username"); //my username
 
 let ALL_USERS = null; //all users
@@ -12,6 +13,7 @@ const sendInput = document.getElementById("sendInput");
 const messages = document.getElementById("messages");
 const roomTitle = document.getElementById("room");
 const commonRoomLink = document.getElementById("common");
+const userTypingSpan = document.getElementById("user-typing");
 
 sendInput.focus();
 
@@ -19,6 +21,7 @@ socket.connect();
 //pass in username to the server socket
 socket.auth = { username: USERNAME };
 
+//UTILITY FUNCTIONS
 function getUsernameFromParams(param) {
     const url = new URL(window.location.href);
     const search = new URLSearchParams(url.search);
@@ -48,11 +51,13 @@ function getUser(usernameToFind, allUsers) {
     }
     return user;
 }
+
 // EVENT LISTENERS
 commonRoomLink.addEventListener("click", (e) => {
     e.preventDefault();
     if(SELECTED_USER) {
-        socket.emit("leave room", SELECTED_USER.chatId); //leave current room
+        //userTypingSpan.innerHTML = "";
+        socket.emit("leave room", SELECTED_USER); //leave current room
         socket.emit("public chat"); //load public chat
     }
     sendInput.focus();
@@ -64,6 +69,7 @@ sendForm.addEventListener("submit", e => {
     const input = sendInput.value;
     if(input.trim() === "") return;
 
+    //TODO: determine message type here
     if(SELECTED_USER) {
         socket.emit("private message", input, SELECTED_USER);
     } else {
@@ -80,11 +86,10 @@ friends.addEventListener("click", e => {
     const fromUser = USERNAME;
 
     if(SELECTED_USER) { //jumping between private chats
-        if(SELECTED_USER.username === toUser)
+        if(SELECTED_USER.username === toUser) //same user that is already selected
             return;
-        socket.emit("leave room", SELECTED_USER.chatId);
+        socket.emit("leave room", SELECTED_USER);
     }
-
     socket.emit("private chat", fromUser, toUser);
 });
 
@@ -110,11 +115,12 @@ friends.addEventListener("click", e => {
 //alex becomes the chatee to john
 //chat = me.chatIds[chatee] = { id };
 
+//MISCELLANEOUS
 //default value for 'id' is null
 //function setHasNewMessageTo(bool, { username: chatee, chatIds: { [USERNAME]: { id } = { id: null } } }) {
 function setHasNewMessageTo(bool, { username: chatee, chatIds }) {
     //destructuring: computed property name [USERNAME] destructures the object that it contains { id: "chatId", hasNewMessage } to retrieve the 'id'
-    const { [USERNAME]: { id } } = chatIds;
+    const { [USERNAME]: { id } = { id: null } } = chatIds;
     if(id === null) {
         throw new Error(`Chat with the user ${chatee} does not exist!`);
     }
@@ -134,6 +140,7 @@ function getNewMessageUsers(me) {
             .map(([user, _]) => user);
 }
 
+//RENDER ON THE SCREEN
 function renderUsers(users) {
     const newMessageFromUsers = getNewMessageUsers(ME);
 
@@ -179,10 +186,11 @@ function renderChat(chat) {
 }
 //TODO: need one protocol for all events e.g. username as a first argument
 //then we can make a list of events that require the toUser and find it before any other event is fired
-socket.prependAny((eventName, ...args) => {
+//socket.prependAny((eventName, ...args) => {
+//
+//});
 
-});
-
+//GENERIC MESSAGES IN CHAT
 function userJoinedLeft(username, joined) {
     if(SELECTED_USER && SELECTED_USER.username !== username) return;//print only if we are in the Common Room or chatting with that person
     const li = document.createElement("li");
@@ -190,7 +198,7 @@ function userJoinedLeft(username, joined) {
     messages.appendChild(li);
 }
 
-function connectedLeftEvent({ username }, conn) { // conn = connected is a boolean
+function connectedLeftEvent(conn, { username }) { // conn = connected is a boolean
     const localUser = getUser(username, ALL_USERS);
     localUser.isConnected = conn;// we set isConnected to true/false on the server upon the connection/disconnect event receival
     renderUsers(ALL_USERS);
@@ -198,13 +206,13 @@ function connectedLeftEvent({ username }, conn) { // conn = connected is a boole
 }
 
 //SOCKET EVENTS
+socket.on("user connected", connectedLeftEvent.bind(null, true)); // function currying(first param is 'true', second is the object comming from the server)
+socket.on("user left", connectedLeftEvent.bind(null, false));
+
 socket.on("bad connection", () => {
     alert("Bad connection");
     window.location.href = "/";
 });
-
-socket.on("user connected", connectedLeftEvent);
-socket.on("user left", connectedLeftEvent);
 
 //render the list of all users
 socket.on("all users", users => {
@@ -234,6 +242,7 @@ socket.on("public chat", publicChat => {
     commonRoomLink.classList.add("hidden"); 
     renderChat(publicChat);
     renderUsers(ALL_USERS);
+    userTypingSpan.innerHTML = "";
 });
 
 socket.on("private message", (message) => {
@@ -266,69 +275,62 @@ socket.on("private chat", ({ chatId, username: toUsername, history }) => {
     } else {
         messages.innerHTML = "";
     }
+    userTypingSpan.innerHTML = "";
 
     roomTitle.textContent = `Chatting privately with ${toUsername}`;
     commonRoomLink.classList.remove("hidden"); //show the link to the Common Room
     renderUsers(ALL_USERS);
 });
 
+socket.on("connect", function() {
+    socket.emit("public chat");
+});
+
+
 //USER TYPING
 
-//debouncer runs functions provided no often then once in 'time' milliseconds
-function debouncer(sendStarted, sendStopped, time=500) {
+//debouncer runs the function provided no often then once in 'time' milliseconds
+function debouncer(userTyping, time=500) {
     let timer = null;
     let started = false; // user started typing
     return () => {
         console.log(timer, started);
-        if(!started) { //allow to run sendStarted only once before the timer runs out
+        if(!started) { //allow to run userTyping(true) only once before the timer runs out
             console.log("sendStarted is called");
             started = true;
-            sendStarted();
+            userTyping(true);
         }
         clearTimeout(timer);
-        timer = setTimeout(() => { //if timer runs out call sendStopped and reset started
+        timer = setTimeout(() => { //if timer runs out call userTyping(false) and reset the 'started'
             console.log("sendStopped is called");
             started = false;
-            sendStopped();
+            userTyping(false);
         }, time);
     }
 }
-//TODO: instead of two events make one with true/false standing for started/stopped typing
-const typing = function() { socket.emit(this, USERNAME, SELECTED_USER) } 
-
-//const userTyping = debouncer(
-//    () => socket.emit("started typing", USERNAME, SELECTED_USER), // user started typing event
-//    () => socket.emit("stopped typing", USERNAME, SELECTED_USER), // user stopped typing event
-//    2000);                                         // time after which send the 'stopped typing' event
-const userTyping = debouncer(
-    typing.bind("started typing"),
-    typing.bind("stopped typing"),
-    2000);                                         // time after which send the 'stopped typing' event
-
-// on the first run of the userTyping function the sendStarted function is called
+// on the first run of the function returned by the debouncer, the userTyping(true) function is called
 // it is called only once until the timer runs out
 // while the user is typing the timer keeps resetting itself
-// if there is no input for 2 seconds the timer runs out and the sendStopped function is called
-// on the following call of the userTyping function the sendStarted will be called again and so on it goes.
-sendInput.addEventListener("input", userTyping);
-
-const userTypingSpan = document.getElementById("user-typing");
-
-socket.on("started typing", username => {
-    userTypingSpan.innerHTML = `<em>${username} is typing...</em>`;
-});
-
-socket.on("stopped typing", username => {
-    userTypingSpan.innerHTML = "";
+// if there is no input for 2 seconds the timer runs out and the userTyping(false) function is called
+// userTyping function emits the 'user typing' event with the boolean value provided
+// that triggers different action on the client(s)
+// we either set who is typing or remove
+const typingEvent = (bool) => socket.emit("user typing", bool, USERNAME, SELECTED_USER);
+sendInput.addEventListener("input", debouncer(typingEvent, 2000));
+//TODO: check that when the user-typing-false is received it's from the user that is currently 'typing' on the screen
+socket.on("user typing", (bool, username) => {
+    if(bool) { //we can overwrite who is typing
+        userTypingSpan.id = username;
+        userTypingSpan.innerHTML = `<em>${username} is typing...</em>`;
+    } else { // we can only empty our own typing banner(the last person who started typing is actually shown typing)
+        if(userTypingSpan.id === username)
+            userTypingSpan.innerHTML = "";
+    }
 });
 
 //TODO: multiuser typing. Hard code the <ul></ul>. On 'started typing' event create a <li></li> string with id of user
 // and contents of username. Push to array, join on 'and' and finally add 'is/are typing'.
 // Keep adding users if there are more 'started typing' events.
 // When the 'stopped typing' event is received remove from array and do the above.
-
-//socket.on("connect", function() {
-//    //socket.emit("public chat");
-//});
 
 //TODO: when one user opens two tabs and then closes one of them he is seen as offline to everyone else
