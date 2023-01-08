@@ -44,17 +44,31 @@ app.get("/chat", (req, res) => {
     res.render("chat");
 });
 
-function getSocketByUsername(username) {
+async function getSocketByUsername(username, room) {
+    //if room is null then search all sockets
+
     //console.log(io.of("/").sockets.values);
     //console.log(io.sockets.sockets); //all connected sockets
-    let sock = null;
-    for (const [_, s] of io.of("/").sockets) {
-        if(s.user.username === username) {
-            sock = s;
-            break;
-        }
+    //io.in(roomID).fetchSockets()
+    //await io.in("room1").fetchSockets();
+    //await io.fetchSockets();
+    let roomSocs;
+    if(room) {
+        roomSocs = await io.in(room).fetchSockets();
+    } else {
+        roomSocs = await io.fetchSockets(); 
     }
-    return sock;
+    const socket = roomSocs.find(soc => soc.user.username === username);
+    return socket;
+    //let sock = null;
+    //for (const [_, s] of io.of("/").sockets.in(PUBLIC_CHAT_ROOM)) {
+    //    console.log(s.user.username);
+    //    //if(s.user.username === username) {
+    //    //    sock = s;
+    //    //    break;
+    //    //}
+    //}
+    //return sock;
 }
 
 function createMessage(type, message) {
@@ -101,7 +115,6 @@ io.on("connection", socket => {
     //send to everyone except yourself
     socket.broadcast.emit("user connected", user);
     //************************************** */
-
     socket.on("disconnect", reason => {
         console.log(reason);
 
@@ -114,6 +127,7 @@ io.on("connection", socket => {
         socket.join(PUBLIC_CHAT_ROOM);
         //TODO: return last say 50 messages
         socket.emit("public chat", PUBLIC_CHAT);
+        socket.to(PUBLIC_CHAT).emit("i joined", socket.user.username);
     });
 
     socket.on("public message", msg => {
@@ -125,6 +139,7 @@ io.on("connection", socket => {
     //TODO: check that users exist
     socket.on("private chat", function (from, to) {
         if(from === to) return;
+        console.log("private chat from to", from, to);
 
         let chatId;
         let history;
@@ -153,7 +168,8 @@ io.on("connection", socket => {
         socket.join(chatId); // current user joins the room 'chatId'
         console.log("joined");
 
-        return socket.emit("private chat", { chatId, username: to, history });
+        socket.emit("private chat", { chatId, username: to, history });
+        socket.to(chatId).emit("i joined", from);
 
         //io.sockets.sockets.forEach(socket => {
         //    console.log(socket.user);
@@ -167,7 +183,7 @@ io.on("connection", socket => {
 
         const chat = PRIVATE_CHATS.get(chatId);
         chat.push(message);
-        
+        //TODO: use getSocketByUsername to find the 'to' user in the room, then check for null and if the socket is online
         const toUser = USERS.find(user => user.username === to); //find the 'to' user
 
         const usersInRoom = await io.in(chatId).fetchSockets();//fetch sockets from the room 'chatId'
@@ -176,32 +192,45 @@ io.on("connection", socket => {
             io.to(chatId).emit("private message", message);// send to both
         } else {
             if(toUser.isConnected) {
-                const toSock = getSocketByUsername(toUser.username);
+                const toSock = await getSocketByUsername(toUser.username);
                 toSock.emit("has new message", toUser, socket.user, chatId); //send notification to all users except myself
             }
             toUser.chatIds[socket.user.username].hasNewMessage = true; //notify the user that he has new unread messages when he logges in
             socket.emit("private message", message);// send to myself
         }
     });
-    // leave private room
-    socket.on("leave room", ({ username, chatId: room }) => {
+
+    socket.on("leave room", ({ username, chatId: room = PUBLIC_CHAT_ROOM }) => {
+        //socket.to(room).emit("user typing", false, socket.user.username);
+
+        //if(username) { //leaving private room
+        //    //const toSock = getSocketByUsername(username);
+        //    //if (toSock) {
+        //        //console.log("leave room", toSock);
+        //        //toSock.emit("user typing", false, socket.user.username);
+        //    //}
+        //} else {
+        //    console.log("leave public room");
+        //    socket.to(PUBLIC_CHAT_ROOM).emit("user typing", false, socket.user.username);
+        //}
         socket.leave(room);
-        const toSock = getSocketByUsername(username);
-        if(toSock) {
-            console.log("leave room", toSock);
-            toSock.emit("user typing", false, socket.user.username);
-        }
     });
 
-    socket.on("user typing", (bool, username, selUser) => {
+    socket.on("user typing", async (bool, typingUsername, selUser, toSpecificUsername) => {
         console.log(bool ? "started typing" : "stopped typing");
         console.log("selected user", selUser);
-
-        if(selUser) {
+        if(selUser) { // to private chat
             const room = selUser.chatId;
-            return socket.to(room).emit("user typing", bool, username);
+            socket.to(room).emit("user typing", bool, typingUsername);
+        } else if(toSpecificUsername) {
+            const toSock = await getSocketByUsername(toSpecificUsername, PUBLIC_CHAT_ROOM);
+            if(toSock) { // the check in case the 'toSpecificUsername' left the public chat room
+                console.log("user typing > toSpecificUser", toSpecificUsername, toSock.user.username);
+                toSock.emit("user typing", bool, typingUsername);
+            }
+        } else {
+            socket.to(PUBLIC_CHAT_ROOM).emit("user typing", bool, typingUsername);
         }
-        socket.to(PUBLIC_CHAT_ROOM).emit("user typing", bool, username);
     });
 });
 
