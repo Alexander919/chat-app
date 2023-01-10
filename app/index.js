@@ -19,15 +19,18 @@ const io = new Server(server, {
     }
 });
 
+//MongoDB
+import Message from "./models/message.js";
+import PublicMessage from "./models/public_chat.js";
+import PrivateChat from "./models/private_chat.js";
+
 mongoose.set('strictQuery', true);
 
-//MongoDB setup
-async function main() {
+(async function() {
     await mongoose.connect('mongodb://databaseserver:27017/mongochat');
     console.log("Database connected.");
-}
-
-main().catch(err => console.log(err));
+})()
+.catch(err => console.log(err));
 
 app.use(express.static('public'));
 app.set("view engine", "ejs");
@@ -44,12 +47,50 @@ app.get("/chat", (req, res) => {
     res.render("chat");
 });
 
-async function getSocketByUsername(username, room) {
-    //if room is null then search all sockets
+app.get("/mongoose", (req, res) => {
+    res.render("mongoose");
+});
 
+app.get("/mongoose/show/", async (req, res) => {
+    //const msgs = await Message.findOne({username: "alex"});
+    //const maps = await privateMessage.findOne().populate("_keys.77778888");
+    //TODO: if decide to use Map:
+    //there will be only ONE Map. findOne() with no arguments returns the first object
+    //use it to find the chatId needed:
+    //const map = await privateMessage.findOne().populate("_keys");
+    //const map = await privateMessage.findOne().exists("_keys.asdfadsf");
+    const map = await PrivateChat.findOne({ chatId: "zzz" }).populate("messages");
+    //map.get(`_keys.${chatId}`)
+    //const map = await privateMessage.findOne().populate("_keys.11113333");
+    //const map = await privateMessage.findOne({chatId: "jkjdlsjkjfslkd"});
+    console.log(map);
+    res.end();
+});
+
+app.get("/mongoose/submit/", async (req, res) => {
+    const { text, username } = req.query;
+    //console.log(text, username);
+
+    const msg = new Message({ text, username });
+    //const privMsg = new PrivateChat({ chatId: "zzz"});
+    //privMsg.messages.push(msg._id);
+    //await privMsg.save();
+
+    //const map = await PrivateChat.findOne({ chatId: "zzz" });
+    //map.messages.push(msg._id);
+    //await map.save();
+
+    const pubMsg = new PublicMessage({sender: username, message: msg._id});
+    await pubMsg.save();
+
+    await msg.save();
+
+    res.send("submitted");
+});
+
+async function getSocketByUsername(username, room) {
     //console.log(io.of("/").sockets.values);
     //console.log(io.sockets.sockets); //all connected sockets
-    //io.in(roomID).fetchSockets()
     //await io.in("room1").fetchSockets();
     //await io.fetchSockets();
     let roomSocs;
@@ -58,8 +99,7 @@ async function getSocketByUsername(username, room) {
     } else {
         roomSocs = await io.fetchSockets(); 
     }
-    const socket = roomSocs.find(soc => soc.user.username === username);
-    return socket;
+    return roomSocs.find(soc => soc.user.username === username);
     //let sock = null;
     //for (const [_, s] of io.of("/").sockets.in(PUBLIC_CHAT_ROOM)) {
     //    console.log(s.user.username);
@@ -103,7 +143,7 @@ io.on("connection", socket => {
     //find that username in db
     const user = USERS.find(user => user.username === connectedUsername);
 
-    if(user.isConnected || !user) {
+    if(!user || user.isConnected) {
         return socket.emit("bad connection");
     }
     user.isConnected = true;
@@ -127,7 +167,8 @@ io.on("connection", socket => {
         socket.join(PUBLIC_CHAT_ROOM);
         //TODO: return last say 50 messages
         socket.emit("public chat", PUBLIC_CHAT);
-        socket.to(PUBLIC_CHAT).emit("i joined", socket.user.username);
+        console.log("in public chat emitting i joined to", PUBLIC_CHAT_ROOM);
+        socket.to(PUBLIC_CHAT_ROOM).emit("i joined", socket.user.username);
     });
 
     socket.on("public message", msg => {
@@ -213,21 +254,29 @@ io.on("connection", socket => {
         //    console.log("leave public room");
         //    socket.to(PUBLIC_CHAT_ROOM).emit("user typing", false, socket.user.username);
         //}
+        console.log("left room with user", username);
         socket.leave(room);
     });
 
-    socket.on("user typing", async (bool, typingUsername, selUser, toSpecificUsername) => {
+    socket.on("user typing", async (bool, typingUsername, selUser, toSpecificUsernames) => {
         console.log(bool ? "started typing" : "stopped typing");
         console.log("selected user", selUser);
         if(selUser) { // to private chat
             const room = selUser.chatId;
             socket.to(room).emit("user typing", bool, typingUsername);
-        } else if(toSpecificUsername) {
-            const toSock = await getSocketByUsername(toSpecificUsername, PUBLIC_CHAT_ROOM);
-            if(toSock) { // the check in case the 'toSpecificUsername' left the public chat room
-                console.log("user typing > toSpecificUser", toSpecificUsername, toSock.user.username);
-                toSock.emit("user typing", bool, typingUsername);
-            }
+        } else if(toSpecificUsernames) {
+            toSpecificUsernames.forEach(async usn => {
+                const toSock = await getSocketByUsername(usn, PUBLIC_CHAT_ROOM);
+                if(toSock) { // the check in case the 'toSpecificUsername' left the public chat room
+                    console.log("user typing > toSpecificUser", usn, toSock.user.username);
+                    toSock.emit("user typing", bool, typingUsername);
+                }
+            });
+            //const toSock = await getSocketByUsername(toSpecificUsername, PUBLIC_CHAT_ROOM);
+            //if(toSock) { // the check in case the 'toSpecificUsername' left the public chat room
+            //    console.log("user typing > toSpecificUser", toSpecificUsername, toSock.user.username);
+            //    toSock.emit("user typing", bool, typingUsername);
+            //}
         } else {
             socket.to(PUBLIC_CHAT_ROOM).emit("user typing", bool, typingUsername);
         }
