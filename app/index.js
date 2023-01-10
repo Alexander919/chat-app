@@ -23,6 +23,7 @@ const io = new Server(server, {
 import Message from "./models/message.js";
 import PublicMessage from "./models/public_chat.js";
 import PrivateChat from "./models/private_chat.js";
+import User from "./models/user.js";
 
 mongoose.set('strictQuery', true);
 
@@ -137,24 +138,44 @@ function createMessage(type, message) {
 
 //TODO: make a createMessage(messageType) function
 //messageType can be: text, image, url, etc
-io.on("connection", socket => {
-    //console.log(socket.handshake.headers.cookie);
+io.use(async (socket, next) => {
     const connectedUsername = socket.handshake.auth.username;
     //find that username in db
-    const user = USERS.find(user => user.username === connectedUsername);
-
-    if(!user || user.isConnected) {
-        return socket.emit("bad connection");
+    const oneUser = await User.findOne({ username: connectedUsername });
+    if(oneUser) {
+        oneUser.isConnected = true;
+        await oneUser.save();
+        socket.user = oneUser;
+        next();
+    } else {
+        console.log("NO USER");
+        next(new Error("my error"));
     }
-    user.isConnected = true;
-    socket.user = user;
+    //console.log(oneUser);
+    //const user = USERS.find(user => user.username === connectedUsername);
+    //socket.user = user;
 
-    //************************************** */
-    //send to self
-    socket.emit("all users", USERS);
-    //send to everyone except yourself
-    socket.broadcast.emit("user connected", user);
-    //************************************** */
+    console.log("IN MIDDLEWARE");
+});
+
+io.on("connection", socket => {
+    console.log("CONNECTION");
+    ////console.log(socket.handshake.headers.cookie);
+    //const connectedUsername = socket.handshake.auth.username;
+    if(socket.user) {
+        console.log("IS A CLOWN?", socket.user.isAClown);
+        socket.user.isConnected = true;
+        //************************************** */
+        //send to self
+        socket.emit("all users", USERS);
+        //send to everyone except yourself
+        socket.broadcast.emit("user connected", socket.user);
+        //************************************** */
+    } else {
+        //socket.emit("error", "user not found");
+        //socket.disconnect();
+    }
+
     socket.on("disconnect", reason => {
         console.log(reason);
 

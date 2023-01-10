@@ -208,10 +208,6 @@ function renderChat(chat) {
 }
 //TODO: need one protocol for all events e.g. username as a first argument
 //then we can make a list of events that require the toUser and find it before any other event is fired
-//socket.prependAny((eventName, ...args) => {
-//
-//});
-
 //GENERIC MESSAGES IN CHAT
 function userJoinedLeft(username, joined) {
     if(SELECTED_USER && SELECTED_USER.username !== username) return;//print only if we are in the Common Room or chatting with that person
@@ -230,11 +226,6 @@ function connectedLeftEvent(conn, { username }) { // conn = connected is a boole
 //SOCKET EVENTS
 socket.on("user connected", connectedLeftEvent.bind(null, true)); // function currying(first param is 'true', second is the object comming from the server)
 socket.on("user left", connectedLeftEvent.bind(null, false));
-
-socket.on("bad connection", () => {
-    alert("Bad connection");
-    window.location.href = "/";
-});
 
 //render the list of all users
 socket.on("all users", users => {
@@ -326,6 +317,54 @@ socket.on("i joined", username => {
 socket.on("connect", function() {
     socket.emit("public chat");
 });
+
+//TODO: on connect emit some event with acknowledgement function. This function accepts an argument { status: true, users: [...]} 
+//SERVER
+//socket.on("some event", async cb => {
+//    try {
+//        const users = await User.findMany({});
+//        cb({
+//            status: true,
+//            users
+//        });
+//    } catch (e) {
+//        cb({ status: false });
+//    }
+//});
+//CLIENT
+//probably from socket.on("connect", ...)
+//socket.emit("some event", (obj) => {
+//    if(obj.status) {
+//        //do what 'all users' event does
+//    }
+//})
+
+//socket.prependAny("bad connection", (arg) => {
+//    console.log("BAD CONNECTION");
+//});
+
+//HANDLING ERROR
+////Server 
+//io.use(function(socket, next){ 
+//    if (socket.request.headers.cookie) 
+//        return next(); 
+//    const errorMessage = JSON.stringify( new AuthenticationError() ); 
+//    next (new Error( errorMessage ) ); 
+//}); 
+// Client 
+socket.on('connect_error', ( err ) => {
+    console.log("IN CONNECT_ERROR", err);
+    alert(err);
+    window.location.href = "/";
+    //let error = err.toString().split( 'Error:' )[ 1 ].trim(); 
+    //error = JSON.parse( error ); // do whatever with the error object } ); 
+});
+
+socket.on("error", message => {
+    alert(`Error ${message}`);
+    window.location.href = "/";
+});
+
 
 //USER TYPING
 const TYPING_USERS = new Map(); //typing users map
