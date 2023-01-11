@@ -15,6 +15,7 @@ const messages = document.getElementById("messages");
 const roomTitle = document.getElementById("room");
 const commonRoomLink = document.getElementById("common");
 const userTypingSpan = document.getElementById("user-typing");
+const chatDiv = document.querySelector(".chat");
 
 sendInput.focus();
 
@@ -42,7 +43,7 @@ function meFirst(key, value) {
 }
 
 function scrollBottom() {
-    window.scrollTo(0, document.body.scrollHeight);
+    chatDiv.scrollTo(0, document.body.scrollHeight);
 }
 
 function getUser(usernameToFind, allUsers) {
@@ -62,10 +63,10 @@ commonRoomLink.addEventListener("click", (e) => {
 
     if(SELECTED_USER) {
         console.log("in commonRoomLink leave room and public chat");
-        socket.emit("leave room", SELECTED_USER || {}); //leave current room
-        socket.emit("public chat"); //load public chat
+        socket.emit("leave room", SELECTED_USER); //leave current room
     }
-    //TYPING_STARTED_CONTROL.started = false;
+    socket.emit("public chat"); //load public chat
+
     sendInput.focus();
 });
 
@@ -78,9 +79,9 @@ sendForm.addEventListener("submit", e => {
     TYPING_STARTED_CONTROL.typingStopped();
     //TODO: determine message type here
     if(SELECTED_USER) {
-        socket.emit("private message", input, SELECTED_USER);
+        socket.emit("private message", { type: "text", contents: input }, SELECTED_USER);
     } else {
-        socket.emit("public message", input);
+        socket.emit("public message", { type: "text", contents: input });
     }
     sendInput.value = "";
 });
@@ -98,20 +99,6 @@ function friendClickEvent(e) {
     socket.emit("leave room", SELECTED_USER || {});
     socket.emit("private chat", fromUser, toUser);
 }
-//friends.addEventListener("click", e => {
-//    sendInput.focus();
-//
-//    const toUser = e.target.id.trim();
-//    const fromUser = USERNAME;
-//
-//    if(SELECTED_USER && SELECTED_USER.username === toUser || toUser === USERNAME) return;
-//
-//    TYPING_STARTED_CONTROL.typingStopped();
-//
-//    socket.emit("leave room", SELECTED_USER || {});
-//    socket.emit("private chat", fromUser, toUser);
-//});
-
 //second parameter must look like this: 
 //{ 
 //    username: "chater", 
@@ -194,7 +181,7 @@ function renderUsers(users) {
     });
 }
 
-function appendMessage({ time, user: { username }, text }) {
+function appendMessage({ time, username, text }) {
     const li = document.createElement("li");
     const me = username === USERNAME;
 
@@ -206,8 +193,6 @@ function renderChat(chat) {
     messages.innerHTML = "";
     chat.forEach(appendMessage);
 }
-//TODO: need one protocol for all events e.g. username as a first argument
-//then we can make a list of events that require the toUser and find it before any other event is fired
 //GENERIC MESSAGES IN CHAT
 function userJoinedLeft(username, joined) {
     if(SELECTED_USER && SELECTED_USER.username !== username) return;//print only if we are in the Common Room or chatting with that person
@@ -226,21 +211,6 @@ function connectedLeftEvent(conn, { username }) { // conn = connected is a boole
 //SOCKET EVENTS
 socket.on("user connected", connectedLeftEvent.bind(null, true)); // function currying(first param is 'true', second is the object comming from the server)
 socket.on("user left", connectedLeftEvent.bind(null, false));
-
-//render the list of all users
-socket.on("all users", users => {
-    users.sort(meFirst("username", USERNAME));
-
-    users.forEach(({ username, ...rest }) => {
-        if(username === USERNAME) {
-            rest.me = true;
-            ME = rest;
-        }
-        ALL_USERS_MAP.set(username, rest);
-    });
-    //renderUsers(ALL_USERS);
-    renderUsers(ALL_USERS_MAP);
-});
 
 function publicMessageCb(msg) {
     appendMessage(msg);
@@ -263,7 +233,7 @@ socket.on("public chat", publicChat => {
 });
 
 socket.on("private message", (message) => {
-    const msgFromUsername = message.user.username;
+    const msgFromUsername = message.username;
     if(SELECTED_USER && 
         ((msgFromUsername === SELECTED_USER.username) || //chat window with the selected user is opened
             (msgFromUsername === USERNAME))) { //message from myself
@@ -291,7 +261,7 @@ socket.on("private chat", ({ chatId, username: toUsername, history }) => {
     } else {
         messages.innerHTML = "";
     }
-    roomTitle.textContent = `Chatting privately with ${toUsername}`;
+    roomTitle.textContent = `chat with ${toUsername}`;
     commonRoomLink.classList.remove("hidden"); //show the link to the Common Room
     renderUsers(ALL_USERS_MAP);
 
@@ -308,63 +278,40 @@ socket.on("i joined", username => {
     console.log("i joined", username, "typing started", TYPING_STARTED_CONTROL.started);
     if(TYPING_STARTED_CONTROL.started) { //current user is typing
         console.log("to specific username", username);
-        //TYPING_STARTED_CONTROL.userToNotify = username; // send typing notification to the specific user
+
         TYPING_STARTED_CONTROL.addToNotify(username);
     }
-    //TYPING_STARTED_CONTROL.started = false; //on the next text input event sent 'user typing' event
 });
 
 socket.on("connect", function() {
-    socket.emit("public chat");
+    //render the list of all users
+    socket.emit("all users", ({ users, status, err }) => {
+        if(!status) error(err);
+
+        users.sort(meFirst("username", USERNAME));
+
+        users.forEach(({ username, __v, _id, ...rest }) => {
+            //const rest = {isConnected, chatIds};
+            if (username === USERNAME) {
+                rest.me = true;
+                ME = rest;
+            }
+            ALL_USERS_MAP.set(username, rest);
+        });
+        renderUsers(ALL_USERS_MAP);
+    });
 });
 
-//TODO: on connect emit some event with acknowledgement function. This function accepts an argument { status: true, users: [...]} 
-//SERVER
-//socket.on("some event", async cb => {
-//    try {
-//        const users = await User.findMany({});
-//        cb({
-//            status: true,
-//            users
-//        });
-//    } catch (e) {
-//        cb({ status: false });
-//    }
-//});
-//CLIENT
-//probably from socket.on("connect", ...)
-//socket.emit("some event", (obj) => {
-//    if(obj.status) {
-//        //do what 'all users' event does
-//    }
-//})
-
-//socket.prependAny("bad connection", (arg) => {
-//    console.log("BAD CONNECTION");
-//});
-
-//HANDLING ERROR
-////Server 
-//io.use(function(socket, next){ 
-//    if (socket.request.headers.cookie) 
-//        return next(); 
-//    const errorMessage = JSON.stringify( new AuthenticationError() ); 
-//    next (new Error( errorMessage ) ); 
-//}); 
-// Client 
+function error(e) {
+    alert(e);
+    window.location.href = "/";
+}
 socket.on('connect_error', ( err ) => {
     console.log("IN CONNECT_ERROR", err);
-    alert(err);
-    window.location.href = "/";
+    error(err);
     //let error = err.toString().split( 'Error:' )[ 1 ].trim(); 
     //error = JSON.parse( error ); // do whatever with the error object } ); 
 });
-
-socket.on("error", message => {
-    alert(`Error ${message}`);
-    window.location.href = "/";
-});
-
 
 //USER TYPING
 const TYPING_USERS = new Map(); //typing users map
