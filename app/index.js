@@ -4,13 +4,11 @@ const app = express();
 import http from "http";
 const server = http.createServer(app);
 
-import USERS from "./users.js";
-import PRIVATE_CHATS from "./private-chats.js";
-import PUBLIC_CHAT from "./public-chat.js";
-
+const MAX_MSGS = 50;
 const PUBLIC_CHAT_ROOM = "public_chat";
 
 const { randomBytes } = await import('node:crypto');
+
 import { Server } from "socket.io";
 const io = new Server(server, {
     cookie: true,
@@ -21,8 +19,9 @@ const io = new Server(server, {
 
 //MongoDB
 import Message from "./models/message.js";
-import PublicMessage from "./models/public_chat.js";
+import PublicMessage from "./models/public_message.js";
 import PrivateChat from "./models/private_chat.js";
+import User from "./models/user.js";
 
 mongoose.set('strictQuery', true);
 
@@ -47,57 +46,14 @@ app.get("/chat", (req, res) => {
     res.render("chat");
 });
 
-app.get("/mongoose", (req, res) => {
-    res.render("mongoose");
-});
-
-app.get("/mongoose/show/", async (req, res) => {
-    //const msgs = await Message.findOne({username: "alex"});
-    //const maps = await privateMessage.findOne().populate("_keys.77778888");
-    //TODO: if decide to use Map:
-    //there will be only ONE Map. findOne() with no arguments returns the first object
-    //use it to find the chatId needed:
-    //const map = await privateMessage.findOne().populate("_keys");
-    //const map = await privateMessage.findOne().exists("_keys.asdfadsf");
-    const map = await PrivateChat.findOne({ chatId: "zzz" }).populate("messages");
-    //map.get(`_keys.${chatId}`)
-    //const map = await privateMessage.findOne().populate("_keys.11113333");
-    //const map = await privateMessage.findOne({chatId: "jkjdlsjkjfslkd"});
-    console.log(map);
-    res.end();
-});
-
-app.get("/mongoose/submit/", async (req, res) => {
-    const { text, username } = req.query;
-    //console.log(text, username);
-
-    const msg = new Message({ text, username });
-    //const privMsg = new PrivateChat({ chatId: "zzz"});
-    //privMsg.messages.push(msg._id);
-    //await privMsg.save();
-
-    //const map = await PrivateChat.findOne({ chatId: "zzz" });
-    //map.messages.push(msg._id);
-    //await map.save();
-
-    const pubMsg = new PublicMessage({sender: username, message: msg._id});
-    await pubMsg.save();
-
-    await msg.save();
-
-    res.send("submitted");
-});
-
 async function getSocketByUsername(username, room) {
     //console.log(io.of("/").sockets.values);
     //console.log(io.sockets.sockets); //all connected sockets
-    //await io.in("room1").fetchSockets();
-    //await io.fetchSockets();
     let roomSocs;
     if(room) {
-        roomSocs = await io.in(room).fetchSockets();
+        roomSocs = await io.in(room).fetchSockets(); // fetch all sockets in the room
     } else {
-        roomSocs = await io.fetchSockets(); 
+        roomSocs = await io.fetchSockets(); // fetch all connected sockets
     }
     return roomSocs.find(soc => soc.user.username === username);
     //let sock = null;
@@ -111,13 +67,12 @@ async function getSocketByUsername(username, room) {
     //return sock;
 }
 
-function createMessage(type, message) {
-    //const message = { user, time: new Date().toLocaleTimeString() };
-    let contents = "I don't know what you are";
+function createMessage({ type="text", contents, username }) {
+    const message = new Message();
 
     switch(type) {
         case "text":
-            contents = msg;
+            message.text = contents;
             break;
         case "img":
             break;
@@ -129,79 +84,137 @@ function createMessage(type, message) {
             //leave contents unchanged
     }
     ({
-        time:       message.time = new Date().toLocaleTimeString(),
-        contents:   message.contents = contents,
-        user:       message.user = "unknown"
-    } = message);
+        text:     message.text = "",
+        username: message.username = username
+    } = message
+    );
+
+    message.save();
+
+    return message;
 }
 
-//TODO: make a createMessage(messageType) function
-//messageType can be: text, image, url, etc
-io.on("connection", socket => {
-    //console.log(socket.handshake.headers.cookie);
+function getNumOfConnections(myUsername) {
+    let numOfSocks = 0;
+    for (let [id, { user: { username } }] of io.of("/").sockets) {
+        if (myUsername === username) {
+            numOfSocks++;
+        }
+    }
+    return numOfSocks;
+}
+//socket.io middleware
+io.use(async (socket, next) => {
     const connectedUsername = socket.handshake.auth.username;
     //find that username in db
-    const user = USERS.find(user => user.username === connectedUsername);
+    const oneUser = await User.findOne({ username: connectedUsername });
+    if(!oneUser) {
+        next(new Error("User error!"));
+    } else {
+        oneUser.isConnected = true;
+        socket.user = oneUser;
 
-    if(!user || user.isConnected) {
-        return socket.emit("bad connection");
+        await oneUser.save();
+
+        next();
     }
-    user.isConnected = true;
-    socket.user = user;
+});
 
-    //************************************** */
-    //send to self
-    socket.emit("all users", USERS);
-    //send to everyone except yourself
-    socket.broadcast.emit("user connected", user);
-    //************************************** */
-    socket.on("disconnect", reason => {
-        console.log(reason);
+io.on("connection", socket => {
+    //console.log(socket.handshake.headers.cookie);
+    //const connectedUsername = socket.handshake.auth.username;
+    if(socket.user) {
+        //send to everyone except yourself
+        socket.broadcast.emit("user connected", socket.user);
+    }
 
-        socket.user.isConnected = false;
-        socket.broadcast.emit("user left", socket.user);
-        socket.broadcast.emit("user typing", false, socket.user.username);
+    socket.on("connect_error", (err) => {
+        console.log(`connect_error due to ${err.message}`);
+
+        if(socket.user) {
+            socket.user.isConnected = false;
+            socket.user.save();
+        }
     });
 
-    socket.on("public chat", function() {
+    socket.on("disconnect", async reason => {
+        console.log(reason);
+
+        if(!getNumOfConnections(socket.user.username)) { // check to see the user is still connected (multiple logins)
+            socket.user.isConnected = false;
+            socket.user.save();
+
+            socket.broadcast.emit("user left", socket.user);
+            socket.broadcast.emit("user typing", false, socket.user.username);
+        }
+    });
+
+    socket.on("all users", async (callback) => {
+        try {
+            const users = await User.find();
+            callback({ status: true, users });
+        } catch (err) {
+            callback({ status: false, err });
+        }
+    });
+
+    socket.on("public chat", async () => {
         socket.join(PUBLIC_CHAT_ROOM);
-        //TODO: return last say 50 messages
-        socket.emit("public chat", PUBLIC_CHAT);
-        console.log("in public chat emitting i joined to", PUBLIC_CHAT_ROOM);
+        // populate message field and convert from { message: { text, username, time } } to { text, username, time }
+        const pipe =  PublicMessage.aggregate([
+            { $skip: PublicMessage.count() - MAX_MSGS }, // return last MAX_MSGS
+            { $lookup: {
+                "from": "messages",
+                "localField": "message",
+                "foreignField": "_id",
+                "as": "msg" }
+            }, 
+            { $unwind: "$msg" }, 
+            { $project: {   
+                "text": "$msg.text", 
+                "username": "$msg.username", 
+                "time": "$msg.time", 
+                "_id": 0 } 
+            } 
+        ]);
+        const public_msgs = await pipe.exec();
+
+        socket.emit("public chat", public_msgs);
         socket.to(PUBLIC_CHAT_ROOM).emit("i joined", socket.user.username);
     });
 
-    socket.on("public message", msg => {
-        const message = { text: msg, user: socket.user, time: new Date().toLocaleTimeString() };
-        PUBLIC_CHAT.push(message);
-        io.to(PUBLIC_CHAT_ROOM).emit("public message", message);//send to everybody including myself
+    socket.on("public message", data => {
+        const msg = createMessage({ username: socket.user.username, ...data });
+        PublicMessage.create({ sender: msg.username, message: msg._id });
+
+        io.to(PUBLIC_CHAT_ROOM).emit("public message", msg);//send to everybody including myself
     });
 
-    //TODO: check that users exist
-    socket.on("private chat", function (from, to) {
+    socket.on("private chat", async function (from, to) {
         if(from === to) return;
-        console.log("private chat from to", from, to);
 
-        let chatId;
-        let history;
+        let chatId = null;
+        let history = null;
 
-        const fromUser = USERS.find(user => user.username === from); //find the 'from' user
-        const chatObj = fromUser.chatIds[to]; //check if the 'from' user has a chat with 'to' user
+        const fromUser = await User.findOne({ username: from });
+        const toUser = await User.findOne({ username: to });
 
-        if(chatObj) {
+        const chatObj = fromUser.chatIds.get(to);
+
+        if(chatObj) { // chat exists
             chatId = chatObj.id;
-            history = PRIVATE_CHATS.get(chatId);
+            history = await PrivateChat.findById(chatId).populate("messages");
 
-            fromUser.chatIds[to].hasNewMessage = false;//disable new message notification
+            fromUser.chatIds.get(to).hasNewMessage = false;
         } else {
-            chatId = generateId();//generate new chatId
-            PRIVATE_CHATS.set(chatId, []);
+            const private_chat = await PrivateChat.create({});
+            chatId = private_chat._id;
 
-            const toUser = USERS.find(user => user.username === to); //find the 'to' user
-
-            fromUser.chatIds[to] = { id: chatId, hasNewMessage: false };
-            toUser.chatIds[from] = { id: chatId, hasNewMessage: false };
+            fromUser.chatIds.set(to, { id: chatId, hasNewMessage: false }); //both users share the same private chat id
+            toUser.chatIds.set(from, { id: chatId, hasNewMessage: false });
         }
+        fromUser.save();
+        toUser.save();
 
         if(socket.rooms.has(PUBLIC_CHAT_ROOM)) //check if user is jumping between private chats
             socket.leave(PUBLIC_CHAT_ROOM);
@@ -209,74 +222,50 @@ io.on("connection", socket => {
         socket.join(chatId); // current user joins the room 'chatId'
         console.log("joined");
 
-        socket.emit("private chat", { chatId, username: to, history });
+        socket.emit("private chat", { chatId, username: to, history: history?.messages.slice(-MAX_MSGS) });
         socket.to(chatId).emit("i joined", from);
 
         //io.sockets.sockets.forEach(socket => {
         //    console.log(socket.user);
         //});
-        //for(let [id, socket]of io.of("/").sockets) {
-        //    console.log(id);
-        //}
     });
-    socket.on("private message", async (msg, { chatId, username: to }) => {
-        const message = { text: msg, user: socket.user, time: new Date().toLocaleTimeString() };
+    socket.on("private message", async (data, { chatId, username: to }) => {
+        const message = createMessage({ username: socket.user.username, ...data });
 
-        const chat = PRIVATE_CHATS.get(chatId);
-        chat.push(message);
-        //TODO: use getSocketByUsername to find the 'to' user in the room, then check for null and if the socket is online
-        const toUser = USERS.find(user => user.username === to); //find the 'to' user
+        const chat = await PrivateChat.findById(chatId);
+        chat.messages.push(message._id);
+        chat.save();
 
-        const usersInRoom = await io.in(chatId).fetchSockets();//fetch sockets from the room 'chatId'
-        //TODO: we can find toUser socket and use socket.rooms.has(chatId)
-        if (usersInRoom.length > 1) { // toUser is in the room
+        const toSock = await getSocketByUsername(to); // look among all sockets
+        if(toSock && toSock.rooms.has(chatId)) { // user is online and in the private room chatId
             io.to(chatId).emit("private message", message);// send to both
-        } else {
-            if(toUser.isConnected) {
-                const toSock = await getSocketByUsername(toUser.username);
-                toSock.emit("has new message", toUser, socket.user, chatId); //send notification to all users except myself
+        } else { // user is offline or not in the room chatId
+            const toUser = await User.findOne({ username: to });
+            if(toSock) { // user is in some other room
+                toSock.emit("has new message", to, socket.user);
             }
-            toUser.chatIds[socket.user.username].hasNewMessage = true; //notify the user that he has new unread messages when he logges in
+            toUser.chatIds.get(socket.user.username).hasNewMessage = true; //notify the user that he has new unread messages when he logges in
+            toUser.save();
             socket.emit("private message", message);// send to myself
         }
     });
 
     socket.on("leave room", ({ username, chatId: room = PUBLIC_CHAT_ROOM }) => {
-        //socket.to(room).emit("user typing", false, socket.user.username);
-
-        //if(username) { //leaving private room
-        //    //const toSock = getSocketByUsername(username);
-        //    //if (toSock) {
-        //        //console.log("leave room", toSock);
-        //        //toSock.emit("user typing", false, socket.user.username);
-        //    //}
-        //} else {
-        //    console.log("leave public room");
-        //    socket.to(PUBLIC_CHAT_ROOM).emit("user typing", false, socket.user.username);
-        //}
-        console.log("left room with user", username);
+        console.log(`left room ${room} with user ${username}`);
         socket.leave(room);
     });
 
     socket.on("user typing", async (bool, typingUsername, selUser, toSpecificUsernames) => {
-        console.log(bool ? "started typing" : "stopped typing");
-        console.log("selected user", selUser);
         if(selUser) { // to private chat
             const room = selUser.chatId;
             socket.to(room).emit("user typing", bool, typingUsername);
         } else if(toSpecificUsernames) {
-            toSpecificUsernames.forEach(async usn => {
+            for(const usn of toSpecificUsernames) {
                 const toSock = await getSocketByUsername(usn, PUBLIC_CHAT_ROOM);
                 if(toSock) { // the check in case the 'toSpecificUsername' left the public chat room
-                    console.log("user typing > toSpecificUser", usn, toSock.user.username);
                     toSock.emit("user typing", bool, typingUsername);
                 }
-            });
-            //const toSock = await getSocketByUsername(toSpecificUsername, PUBLIC_CHAT_ROOM);
-            //if(toSock) { // the check in case the 'toSpecificUsername' left the public chat room
-            //    console.log("user typing > toSpecificUser", toSpecificUsername, toSock.user.username);
-            //    toSock.emit("user typing", bool, typingUsername);
-            //}
+            }
         } else {
             socket.to(PUBLIC_CHAT_ROOM).emit("user typing", bool, typingUsername);
         }

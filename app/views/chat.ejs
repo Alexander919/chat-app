@@ -20,39 +20,40 @@
       #messages > li { padding: 0.5rem 1rem; }
       #messages > li:nth-child(odd) { background: #efefef; }
 
-      .row { display: flex; align-items: center; height: 20vh; }
-      .column {flex-grow: 1; /*border: solid 1px;*/ }
-      .room-title { width: 15vw; margin: auto; text-align: center;}
-      .hidden { visibility:hidden; }
+      .row { display: flex; height: 80vh}
+      .column { border: solid 1px; }
+      .users { width: 15vw; min-width: 200px; }
+      .chat { width: 80vw; overflow-y: auto;}
+      /* .room-title { width: 10vw; margin: auto; text-align: center;} */
+      .hidden { display: none; }
       /* .title { align-self: center;} */
     </style>
 </head>
 <body>
     <div class="row">
-        <div class="column">
+        <div class="column users">
             <ul id="friends">
                 <!-- <a href="#"><li id="alex">alex</li></a> -->
                 <!-- <a href="#"><li id="john">john</li></a> -->
                 <!-- <a href="#"><li id="greg">greg</li></a> -->
                 <!-- <a href="#"><li id="peter">peter</li></a> -->
             </ul>
-        </div>
-        <div class="column">
+            <ul>
+                <li id="common"><a href="#">PUBLIC CHAT</a></li>
+            </ul>
+            <hr>
+            <ul>
+                <li><a href="/">QUIT</a></li>
+            </ul>
             <div class="room-title">
-                <h2 id="room"></h2>
+                <h3 id="room"></h3>
             </div>
         </div>
-        <div class="column">
-            <div class="room-title">
-                <a href="#" id="common">Back to Common Room</a>
-                <div>
-                    <h3><a href="/">quit</a></h3>
-                </div>
-            </div>
+        <div class="column chat">
+            <h3 id="pubpri">Select private or public chat</h3>
+            <ul id="messages"></ul>
         </div>
     </div>
-
-    <ul id="messages"></ul>
 
     <div id="typingDiv">
         <span id="user-typing"></span>
