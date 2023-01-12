@@ -1,11 +1,19 @@
 import mongoose from "mongoose";
 import User from "../models/user.js";
+import PublicMessage from "../models/public_chat.js";
+import PrivateChat from "../models/private_chat.js";
+import Message from "../models/message.js";
 
 const users = ["alex", "john", "greg", "peter"];
 
 mongoose.set('strictQuery', true);
 mongoose.connect('mongodb://databaseserver:27017/mongochat')
-.then(() => User.deleteMany({}))
+.then(async () => {
+    await User.deleteMany({});
+    await PublicMessage.deleteMany({});
+    await PrivateChat.deleteMany({});
+    await Message.deleteMany({});
+})
 .then(() => {
     console.log("Seeding users...");
     const userPromises = [];

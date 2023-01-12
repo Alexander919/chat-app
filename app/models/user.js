@@ -7,8 +7,9 @@ const User = new Schema({
     chatIds: {
         type: Map, // chatee_username => {id: String, hasNewMessages: Boolean}
         of: {
-            id: String,
-            hasNewMessages: Boolean
+            id: String, // PrivateChat._id
+            hasNewMessage: Boolean,
+            _id: false
         }
     }
 });

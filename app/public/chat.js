@@ -5,7 +5,8 @@ const USERNAME = getUsernameFromParams("username"); //my username
 
 const ALL_USERS_MAP = new Map(); //all users map
 
-let SELECTED_USER = undefined; // currently selected user(private chat)
+let CHAT_STARTED = false;
+let SELECTED_USER = null; // currently selected user(private chat)
 let ME = null; //my user object
 
 const friends = document.getElementById("friends");
@@ -56,25 +57,39 @@ function getUser(usernameToFind, allUsers) {
 }
 
 // EVENT LISTENERS
+
+function startChat() {
+    if(!CHAT_STARTED) {
+        const pubpri = document.getElementById("pubpri");
+        pubpri.classList.add("hidden");
+        CHAT_STARTED = true;
+    }
+}
+
 commonRoomLink.addEventListener("click", (e) => {
     e.preventDefault();
 
+    sendInput.focus();
+
+    if(CHAT_STARTED && !SELECTED_USER) return; //ignore multiple clicks
+
+    startChat();
+    console.log("in commonRoom if");
+
     TYPING_STARTED_CONTROL.typingStopped();
 
-    if(SELECTED_USER) {
-        console.log("in commonRoomLink leave room and public chat");
+    if (SELECTED_USER) {
         socket.emit("leave room", SELECTED_USER); //leave current room
     }
     socket.emit("public chat"); //load public chat
 
-    sendInput.focus();
 });
 
 sendForm.addEventListener("submit", e => {
     e.preventDefault();
 
     const input = sendInput.value;
-    if(input.trim() === "") return;
+    if(!CHAT_STARTED || input.trim() === "") return;
 
     TYPING_STARTED_CONTROL.typingStopped();
     //TODO: determine message type here
@@ -84,16 +99,19 @@ sendForm.addEventListener("submit", e => {
         socket.emit("public message", { type: "text", contents: input });
     }
     sendInput.value = "";
+    sendInput.focus();
 });
 
 function friendClickEvent(e) {
+    startChat();
+
     sendInput.focus();
 
     const toUser = e.target.id.trim();
     const fromUser = USERNAME;
 
     if(SELECTED_USER && SELECTED_USER.username === toUser || toUser === USERNAME) return;
-
+    console.log("friend click event");
     TYPING_STARTED_CONTROL.typingStopped();
 
     socket.emit("leave room", SELECTED_USER || {});
@@ -127,6 +145,7 @@ function friendClickEvent(e) {
 function setHasNewMessageTo(bool, { username: chatee, chatIds }) {
     //destructuring: computed property name [USERNAME] destructures the object that it contains { id: "chatId", hasNewMessage } to retrieve the 'id'
     const { [USERNAME]: { id } = { id: null } } = chatIds;
+    console.log(id, chatee);
     if(id === null) {
         throw new Error(`Chat with the user ${chatee} does not exist!`);
     }
@@ -222,8 +241,8 @@ socket.on("public chat", publicChat => {
         socket.on("public message", publicMessageCb); //activate 'public message' event
 
     SELECTED_USER = null;
-    roomTitle.textContent = "Common Room";
-    commonRoomLink.classList.add("hidden"); 
+    roomTitle.textContent = "";
+    //commonRoomLink.classList.add("hidden"); 
 
     renderUsers(ALL_USERS_MAP);
     renderChat(publicChat);
@@ -242,8 +261,9 @@ socket.on("private message", (message) => {
     scrollBottom();
 });
 //I'm online but chatting with someone else
-socket.on("has new message", (toUser, fromUser, chatId) => {
-    if(toUser.username === USERNAME) {//I am the receiver
+socket.on("has new message", (toUsername, fromUser) => {
+    console.log(toUsername, fromUser, "my username is", USERNAME);
+    if(toUsername === USERNAME) {//I am the receiver
         setHasNewMessageTo(true, fromUser);
         renderUsers(ALL_USERS_MAP);
     }
@@ -262,7 +282,7 @@ socket.on("private chat", ({ chatId, username: toUsername, history }) => {
         messages.innerHTML = "";
     }
     roomTitle.textContent = `chat with ${toUsername}`;
-    commonRoomLink.classList.remove("hidden"); //show the link to the Common Room
+    //commonRoomLink.classList.remove("hidden"); //show the link to the Common Room
     renderUsers(ALL_USERS_MAP);
 
     clearTyping();
