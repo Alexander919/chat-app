@@ -44,12 +44,11 @@ function meFirst(key, value) {
 }
 
 function scrollBottom() {
-    chatDiv.scrollTo(0, document.body.scrollHeight);
+    chatDiv.scrollTo(0, chatDiv.scrollHeight);
 }
 
 function getUser(usernameToFind, allUsers) {
     const user = allUsers.get(usernameToFind);
-    //const user = allUsers.find(user => user.username === usernameToFind);
     if(!user) {
         throw new Error(`User ${usernameToFind} not found!`);
     }
@@ -74,7 +73,6 @@ commonRoomLink.addEventListener("click", (e) => {
     if(CHAT_STARTED && !SELECTED_USER) return; //ignore multiple clicks
 
     startChat();
-    console.log("in commonRoom if");
 
     TYPING_STARTED_CONTROL.typingStopped();
 
@@ -111,7 +109,6 @@ function friendClickEvent(e) {
     const fromUser = USERNAME;
 
     if(SELECTED_USER && SELECTED_USER.username === toUser || toUser === USERNAME) return;
-    console.log("friend click event");
     TYPING_STARTED_CONTROL.typingStopped();
 
     socket.emit("leave room", SELECTED_USER || {});
@@ -145,7 +142,6 @@ function friendClickEvent(e) {
 function setHasNewMessageTo(bool, { username: chatee, chatIds }) {
     //destructuring: computed property name [USERNAME] destructures the object that it contains { id: "chatId", hasNewMessage } to retrieve the 'id'
     const { [USERNAME]: { id } = { id: null } } = chatIds;
-    console.log(id, chatee);
     if(id === null) {
         throw new Error(`Chat with the user ${chatee} does not exist!`);
     }
@@ -173,8 +169,6 @@ function renderUsers(users) {
 
     users.forEach(({ isConnected, me }, username) => {
         const li = document.createElement("li");
-        
-        //const a = document.createElement("a");
         if(me) {
             li.textContent = `${username}(Me)`;
         } else {
@@ -195,7 +189,6 @@ function renderUsers(users) {
             li.textContent = `${username}(${isConnected ? 'online' : 'offline'})`;
             li.id = username;
         }
-        //a.appendChild(li);
         friends.appendChild(li);
     });
 }
@@ -233,7 +226,6 @@ socket.on("user left", connectedLeftEvent.bind(null, false));
 
 function publicMessageCb(msg) {
     appendMessage(msg);
-    scrollBottom();
 }
 //render public chat history
 socket.on("public chat", publicChat => {
@@ -242,13 +234,11 @@ socket.on("public chat", publicChat => {
 
     SELECTED_USER = null;
     roomTitle.textContent = "";
-    //commonRoomLink.classList.add("hidden"); 
 
     renderUsers(ALL_USERS_MAP);
     renderChat(publicChat);
 
     clearTyping();
-    //userTypingSpan.innerHTML = "";
 });
 
 socket.on("private message", (message) => {
@@ -258,11 +248,9 @@ socket.on("private message", (message) => {
             (msgFromUsername === USERNAME))) { //message from myself
         appendMessage(message);
     }
-    scrollBottom();
 });
 //I'm online but chatting with someone else
 socket.on("has new message", (toUsername, fromUser) => {
-    console.log(toUsername, fromUser, "my username is", USERNAME);
     if(toUsername === USERNAME) {//I am the receiver
         setHasNewMessageTo(true, fromUser);
         renderUsers(ALL_USERS_MAP);
@@ -271,7 +259,6 @@ socket.on("has new message", (toUsername, fromUser) => {
 
 socket.on("private chat", ({ chatId, username: toUsername, history }) => {
     ME.chatIds[toUsername] = { id: chatId, hasNewMessage: false };
-
     SELECTED_USER = { username: toUsername, chatId };
 
     socket.off("public message"); //disable public messages
@@ -282,7 +269,6 @@ socket.on("private chat", ({ chatId, username: toUsername, history }) => {
         messages.innerHTML = "";
     }
     roomTitle.textContent = `chat with ${toUsername}`;
-    //commonRoomLink.classList.remove("hidden"); //show the link to the Common Room
     renderUsers(ALL_USERS_MAP);
 
     clearTyping();
@@ -295,10 +281,7 @@ function clearTyping() {
 //'i joined' event lets the current user know that someone joined public/private chat
 //so the current user can send the typing event back
 socket.on("i joined", username => {
-    console.log("i joined", username, "typing started", TYPING_STARTED_CONTROL.started);
     if(TYPING_STARTED_CONTROL.started) { //current user is typing
-        console.log("to specific username", username);
-
         TYPING_STARTED_CONTROL.addToNotify(username);
     }
 });
@@ -311,7 +294,6 @@ socket.on("connect", function() {
         users.sort(meFirst("username", USERNAME));
 
         users.forEach(({ username, __v, _id, ...rest }) => {
-            //const rest = {isConnected, chatIds};
             if (username === USERNAME) {
                 rest.me = true;
                 ME = rest;
@@ -321,16 +303,30 @@ socket.on("connect", function() {
         renderUsers(ALL_USERS_MAP);
     });
 });
+// runs on any event
+socket.onAny((eventName) => {
+    // setTimeout adds the function to the event loop and executes only when the callstack is empty
+    // this way I run this function after the main event, like 'public chat' is finished
+    setTimeout(() => {
+        switch (eventName) {
+            case "public chat":
+            case "public message":
+            case "private chat":
+            case "private message":
+            case "user connected":
+            case "user left":
+                scrollBottom();
+        }
+    }, 0);
+});
 
 function error(e) {
     alert(e);
     window.location.href = "/";
 }
+
 socket.on('connect_error', ( err ) => {
-    console.log("IN CONNECT_ERROR", err);
     error(err);
-    //let error = err.toString().split( 'Error:' )[ 1 ].trim(); 
-    //error = JSON.parse( error ); // do whatever with the error object } ); 
 });
 
 //USER TYPING

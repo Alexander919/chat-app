@@ -19,7 +19,7 @@ const io = new Server(server, {
 
 //MongoDB
 import Message from "./models/message.js";
-import PublicMessage from "./models/public_chat.js";
+import PublicMessage from "./models/public_message.js";
 import PrivateChat from "./models/private_chat.js";
 import User from "./models/user.js";
 
@@ -94,6 +94,16 @@ function createMessage({ type="text", contents, username }) {
     return message;
 }
 
+function getNumOfConnections(myUsername) {
+    let numOfSocks = 0;
+    for (let [id, { user: { username } }] of io.of("/").sockets) {
+        if (myUsername === username) {
+            numOfSocks++;
+        }
+    }
+    return numOfSocks;
+}
+//socket.io middleware
 io.use(async (socket, next) => {
     const connectedUsername = socket.handshake.auth.username;
     //find that username in db
@@ -109,16 +119,6 @@ io.use(async (socket, next) => {
         next();
     }
 });
-
-function getNumOfConnections(myUsername) {
-    let numOfSocks = 0;
-    for (let [id, { user: { username } }] of io.of("/").sockets) {
-        if (myUsername === username) {
-            numOfSocks++;
-        }
-    }
-    return numOfSocks;
-}
 
 io.on("connection", socket => {
     //console.log(socket.handshake.headers.cookie);
@@ -162,7 +162,7 @@ io.on("connection", socket => {
         socket.join(PUBLIC_CHAT_ROOM);
         // populate message field and convert from { message: { text, username, time } } to { text, username, time }
         const pipe =  PublicMessage.aggregate([
-            { $limit: MAX_MSGS }, 
+            { $skip: PublicMessage.count() - MAX_MSGS }, // return last MAX_MSGS
             { $lookup: {
                 "from": "messages",
                 "localField": "message",
@@ -201,7 +201,7 @@ io.on("connection", socket => {
 
         const chatObj = fromUser.chatIds.get(to);
 
-        if(chatObj) {
+        if(chatObj) { // chat exists
             chatId = chatObj.id;
             history = await PrivateChat.findById(chatId).populate("messages");
 
@@ -210,7 +210,7 @@ io.on("connection", socket => {
             const private_chat = await PrivateChat.create({});
             chatId = private_chat._id;
 
-            fromUser.chatIds.set(to, { id: chatId, hasNewMessage: false });
+            fromUser.chatIds.set(to, { id: chatId, hasNewMessage: false }); //both users share the same private chat id
             toUser.chatIds.set(from, { id: chatId, hasNewMessage: false });
         }
         fromUser.save();
@@ -222,7 +222,7 @@ io.on("connection", socket => {
         socket.join(chatId); // current user joins the room 'chatId'
         console.log("joined");
 
-        socket.emit("private chat", { chatId, username: to, history: history?.messages });
+        socket.emit("private chat", { chatId, username: to, history: history?.messages.slice(-MAX_MSGS) });
         socket.to(chatId).emit("i joined", from);
 
         //io.sockets.sockets.forEach(socket => {

@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import User from "../models/user.js";
-import PublicMessage from "../models/public_chat.js";
+import PublicMessage from "../models/public_message.js";
 import PrivateChat from "../models/private_chat.js";
 import Message from "../models/message.js";
 
